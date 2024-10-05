@@ -1,17 +1,12 @@
-from zenrows import ZenRowsClient
 import pandas as pd
 from bs4 import BeautifulSoup
 import time
 from dotenv import load_dotenv
 import os
+from playwright.sync_api import sync_playwright
 
 # Load environment variables from .env file
 load_dotenv()
-
-# ZenRows API setup
-# Get the ZenRows API key from the environment
-api_key = os.getenv("ZENROWS_API_KEY")
-client = ZenRowsClient(api_key)
 
 # File to store the last processed code
 last_processed_file = "last_processed_code.txt"
@@ -19,22 +14,23 @@ last_processed_file = "last_processed_code.txt"
 # Excel file to store the names
 output_file = "ufind_catalog_names.xlsx"
 
-# Function to get the list of names from a given URL using ZenRows
-def get_names_from_page(url):
-    # Use ZenRows to fetch the page with JavaScript rendering enabled
-    params = {"js_render": "true"}  # Enable JavaScript rendering
-    response = client.get(url, params=params)
+# Function to get the list of names from a given URL using Playwright
+def get_names_from_page(url, page):
+    # Use Playwright to navigate to the page
+    page.goto(url)
+    
+    # Wait for the content to load (adjust the wait time if necessary)
+    time.sleep(2)
 
-    # Check if the page exists (200 OK status), otherwise return None
-    if response.status_code == 404:
-        return None  # Return None if the page doesn't exist
+    # Get the page content
+    html_content = page.content()
 
     # Parse the HTML content using BeautifulSoup
-    soup = BeautifulSoup(response.text, 'html.parser')
+    soup = BeautifulSoup(html_content, 'html.parser')
 
     # Find all the name elements on the page
     names_data = []
-    
+
     # Find all div elements that contain the names
     for div in soup.select('.clearfix.container-fluid'):
         # Extract the name
@@ -86,41 +82,68 @@ if last_processed_code:
     start_letter, start_page = last_processed_code.split('-')
     start_page = int(start_page) + 1  # Start from the next page
 
-# Loop through the letters A to Z, starting from the correct letter
-for letter in range(ord(start_letter), ord('Z') + 1):
-    current_letter = chr(letter)
+# Playwright part: using it instead of ZenRows
+with sync_playwright() as p:
+    # Launch browser (you can choose between chromium, firefox, and webkit)
+    browser = p.chromium.launch(headless=False)  # Set headless=True to run in the background
+    context = browser.new_context()
 
-    # Start with the correct page number and continue until we get a 404
-    page_number = start_page if letter == ord(start_letter) else 1
+    # Get the Cloudflare clearance cookie from the environment
+    cf_cookie = os.getenv("CLOUDFLARE_CLEARANCE_COOKIE")
 
-    while True:
-        # Create the URL for the current page
-        code = f"{current_letter}-{page_number}"
-        url = f"https://ufind.name/catalog-{code}"
-        print(f"Fetching: {url}")
+    # Add Cloudflare clearance cookie to the context
+    context.add_cookies([{
+        "name": "cf_clearance",  # Cloudflare clearance cookie name
+        "value": cf_cookie,  # Replace with actual value
+        "domain": "ufind.name",  # Domain for which the cookie is valid
+        "path": "/",  # Path of the cookie
+        "expires": -1,  # -1 means the cookie doesn't expire
+        "httpOnly": True,
+        "secure": True,
+        "sameSite": "Strict"
+    }])
 
-        # Fetch the names from the current page using ZenRows
-        names_data = get_names_from_page(url)
+    # Open a new page in the browser
+    page = context.new_page()
 
-        # If the page doesn't exist, break out of the loop for this letter
-        if names_data is None:
-            print(f"Page not found: {url}. Moving to next letter...")
-            break
+    # Loop through the letters A to Z, starting from the correct letter
+    for letter in range(ord(start_letter), ord('Z') + 1):
+        current_letter = chr(letter)
 
-        # Save the data for this page to the Excel file
-        save_to_excel(names_data, output_file)
-        print(f"Data from {url} saved to {output_file}")
+        # Start with the correct page number and continue until we get a 404
+        page_number = start_page if letter == ord(start_letter) else 1
 
-        # Save the last processed code
-        save_last_processed_code(code)
+        while True:
+            # Create the URL for the current page
+            code = f"{current_letter}-{page_number}"
+            url = f"https://ufind.name/catalog-{code}"
+            print(f"Fetching: {url}")
 
-        # Increment the page number
-        page_number += 1
+            # Fetch the names from the current page using Playwright
+            names_data = get_names_from_page(url, page)
 
-        # Sleep to avoid overwhelming the server
-        time.sleep(2)
+            # If the page doesn't exist (404), break out of the loop for this letter
+            if not names_data:
+                print(f"Page not found: {url}. Moving to next letter...")
+                break
 
-    # Reset start_page for the next letter
-    start_page = 1
+            # Save the data for this page to the Excel file
+            save_to_excel(names_data, output_file)
+            print(f"Data from {url} saved to {output_file}")
+
+            # Save the last processed code
+            save_last_processed_code(code)
+
+            # Increment the page number
+            page_number += 1
+
+            # Sleep to avoid overwhelming the server
+            time.sleep(2)
+
+        # Reset start_page for the next letter
+        start_page = 1
+
+    # Close the browser when done
+    browser.close()
 
 print(f"Scraping complete. Data saved to {output_file}")
