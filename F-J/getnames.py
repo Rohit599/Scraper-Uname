@@ -6,7 +6,8 @@ import os
 from playwright.sync_api import sync_playwright
 
 # Load environment variables from .env file
-load_dotenv()
+dotenv_path = "../.env"  # Update with the actual path to your .env file
+load_dotenv(dotenv_path)
 
 # File to store the last processed code
 last_processed_file = "last_processed_code.txt"
@@ -27,6 +28,12 @@ def get_names_from_page(url, page):
 
     # Parse the HTML content using BeautifulSoup
     soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Check if the title is "Just a moment...", indicating Cloudflare bot protection
+    title = soup.find('title')
+    if title and title.get_text() == "Just a moment...":
+        print("Cloudflare bot detection triggered. Update the CLOUDFLARE_CLEARANCE_COOKIE cookie")
+        exit(1)  # Exit the program with a non-zero status code
 
     # Find all the name elements on the page
     names_data = []

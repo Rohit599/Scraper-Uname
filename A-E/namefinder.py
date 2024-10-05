@@ -6,7 +6,8 @@ import os
 from playwright.sync_api import sync_playwright
 
 # Load environment variables from .env file
-load_dotenv()
+dotenv_path = "../.env"  # Update with the actual path to your .env file
+load_dotenv(dotenv_path)
 
 # Base URL for the website
 base_url = "https://ufind.name"
