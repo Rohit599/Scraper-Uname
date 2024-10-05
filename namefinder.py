@@ -71,6 +71,12 @@ def scrape_data_using_playwright(name, page):
     html_content = page.content()
     soup = BeautifulSoup(html_content, 'html.parser')
 
+    # Check if the title is "Just a moment...", indicating Cloudflare bot protection
+    title = soup.find('title')
+    if title and title.get_text() == "Just a moment...":
+        print("Cloudflare bot detection triggered. Update the CLOUDFLARE_CLEARANCE_COOKIE cookie")
+        exit(1)  # Exit the program with a non-zero status code
+
     # Extract the relevant data
     rows = soup.select('#tblCars .row')
     
@@ -124,6 +130,10 @@ with sync_playwright() as p:
             # Scrape the data for the current name
             print(f"Fetching data for: {name}")
             name_data = scrape_data_using_playwright(name, page)
+
+            if not name_data:
+                print(f"Cars Data not found for : {name}. Moving to next name...")
+                continue
 
             # Append the scraped data to results
             results.extend(name_data)
